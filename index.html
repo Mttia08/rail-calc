@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Eisenbahn Fahrzeitrechner</title>
+    <style>
+        .section {
+            border: 1px solid #ccc;
+            padding: 15px;
+            margin: 10px 0;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+            position: relative;
+        }
+        .delete-button {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px;
+            cursor: pointer;
+        }
+        .add-section-button {
+            border: 1px solid #ccc;
+            padding: 20px;
+            margin: 10px 0;
+            box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+            cursor: pointer;
+            background-color: #f9f9f9;
+            width: 100%;
+            text-align: center;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Eisenbahn Fahrzeitrechner</h1>
+    <label for="beschleunigung">Beschleunigung (m/s²):</label>
+    <input type="number" id="beschleunigung" value="0.75"><br><br>
+
+    <label for="verzögerung">Verzögerung (m/s²):</label>
+    <input type="number" id="verzögerung" value="1"><br><br>
+
+    <div id="container"></div>
+
+    <button id="add-section-button" class="add-section-button">Abschnitt hinzufügen</button>
+
+    <br><br>
+    <button id="calculate-button">Berechnen</button><br><br>
+    <div id="result"></div>
+
+    <script>
+        const container = document.getElementById('container');
+        document.getElementById('add-section-button').addEventListener('click', addSection);
+        document.getElementById('calculate-button').addEventListener('click', calculate);
+
+        function addSection() {
+            const section = document.createElement('div');
+            section.classList.add('section');
+
+            section.innerHTML = `
+                <label for="laenge">Länge (km):</label>
+                <input type="number" class="laenge" step="0.01"><br>
+                <label for="geschwindigkeit">Geschwindigkeit (km/h):</label>
+                <input type="number" class="geschwindigkeit" step="0.01">
+                <button class="delete-button">Löschen</button>
+            `;
+
+            section.querySelector('.delete-button').addEventListener('click', () => {
+                section.remove();
+            });
+
+            container.appendChild(section);
+        }
+
+        function calculate() {
+            const beschleunigung = parseFloat(document.getElementById('beschleunigung').value);
+            const verzögerung = parseFloat(document.getElementById('verzögerung').value);
+            
+            const laengeElems = document.querySelectorAll('.laenge');
+            const geschwindigkeitElems = document.querySelectorAll('.geschwindigkeit');
+
+            const streckenList = [];
+            const vmaxList = [];
+
+            laengeElems.forEach(elem => streckenList.push(parseFloat(elem.value)));
+            geschwindigkeitElems.forEach(elem => vmaxList.push(parseFloat(elem.value)));
+
+            try {
+                const gesamtzeit = berechneMehrereAbschnitte(beschleunigung, verzögerung, vmaxList, streckenList);
+                document.getElementById('result').innerText = `Die Gesamtzeit für die gesamte Strecke beträgt ${gesamtzeit.toFixed(2)} Minuten bzw. ${(gesamtzeit * 1.08).toFixed(2)} Minuten mit 8% Reserve.`;
+            } catch (error) {
+                document.getElementById('result').innerText = `Fehler: ${error.message}`;
+            }
+        }
+
+        function berechneGesamtzeit(v0, vmax, vf, a_acc, a_dec, s_total) {
+            const t1 = (vmax - v0) / a_acc;
+            const s1 = v0 * t1 + 0.5 * a_acc * Math.pow(t1, 2);
+
+            const t3 = (vmax - vf) / a_dec;
+            const s3 = vf * t3 + 0.5 * a_dec * Math.pow(t3, 2);
+
+            const s_beschleunigung_und_bremsen = s1 + s3;
+
+            if (s_total < s_beschleunigung_und_bremsen) {
+                const a_eff = (a_acc * a_dec) / (a_acc + a_dec);
+                const unter_wurzel = Math.pow(v0, 2) + 2 * a_eff * s_total;
+
+                if (unter_wurzel < 0) {
+                    throw new Error("Unmögliche Bewegung mit den gegebenen Parametern.");
+                }
+
+                const vmax_eff = Math.sqrt(unter_wurzel);
+
+                const t1_eff = vmax_eff > v0 ? (vmax_eff - v0) / a_acc : 0;
+                const t3_eff = vmax_eff > vf ? (vmax_eff - vf) / a_dec : 0;
+
+                return t1_eff + t3_eff;
+            } else {
+                const s2 = s_total - s1 - s3;
+                const t2 = s2 > 0 ? s2 / vmax : 0;
+
+                return t1 + t2 + t3;
+            }
+        }
+
+        function berechneMehrereAbschnitte(a_acc, a_dec, vmax_list, strecken_list) {
+            if (vmax_list.length !== strecken_list.length) {
+                throw new Error("Die Listen für Höchstgeschwindigkeiten und Strecken müssen gleich lang sein.");
+            }
+
+            let gesamtzeit = 0;
+            let v0 = 0;
+            let vf = 0;
+
+            for (let i = 0; i < vmax_list.length; i++) {
+                const vmax = vmax_list[i];
+
+                if (i < vmax_list.length - 1) {
+                    vf = Math.min(vmax_list[i + 1], vmax);
+                } else {
+                    vf = 0;
+                }
+
+                const s = strecken_list[i];
+
+                const zeit_abschnitt = berechneGesamtzeit(v0 / 3.6, vmax / 3.6, vf / 3.7, a_acc, a_dec, s * 1000);
+                gesamtzeit += zeit_abschnitt;
+
+                v0 = vf;
+            }
+
+            return gesamtzeit / 60;
+        }
+    </script>
+</body>
+</html>
